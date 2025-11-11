@@ -165,8 +165,6 @@ resource "google_compute_firewall" "app_http" {
   source_ranges = ["0.0.0.0/0"]
   target_tags   = ["http-allowed"]
 }
-}
-
 resource "google_compute_firewall" "ssh" {
   count          = var.ssh_source_cidr == null ? 0 : 1
   name           = "allow-ssh"
@@ -175,7 +173,6 @@ resource "google_compute_firewall" "ssh" {
   source_ranges  = [var.ssh_source_cidr]
   target_tags    = ["app-vm", "jenkins-vm"]
 }
-
 resource "google_compute_firewall" "jenkins_ui" {
   count   = var.jenkins_allow_cidr == null ? 0 : 1
   name    = "allow-jenkins-ui"
