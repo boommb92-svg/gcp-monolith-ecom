@@ -154,11 +154,17 @@ resource "google_sql_user" "appuser" {
 }
 
 resource "google_compute_firewall" "app_http" {
-  name    = "allow-app-http"
-  network = google_compute_network.vpc.name
-  allow { protocol = "tcp"; ports = ["80"] }
+  name    = "app-http-allow"
+  network = google_compute_network.vpc.id
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
   source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["app-vm"]
+  target_tags   = ["http-allowed"]
+}
 }
 
 resource "google_compute_firewall" "ssh" {
