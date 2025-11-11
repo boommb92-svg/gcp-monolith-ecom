@@ -169,7 +169,10 @@ resource "google_compute_firewall" "ssh" {
   count          = var.ssh_source_cidr == null ? 0 : 1
   name           = "allow-ssh"
   network        = google_compute_network.vpc.name
-  allow { protocol = "tcp"; ports = ["22"] }
+  allow {
+  protocol = "tcp"
+  ports    = ["22"]
+}
   source_ranges  = [var.ssh_source_cidr]
   target_tags    = ["app-vm", "jenkins-vm"]
 }
