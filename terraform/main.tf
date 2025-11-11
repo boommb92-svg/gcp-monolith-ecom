@@ -179,12 +179,16 @@ resource "google_compute_firewall" "ssh" {
 resource "google_compute_firewall" "jenkins_ui" {
   count   = var.jenkins_allow_cidr == null ? 0 : 1
   name    = "allow-jenkins-ui"
-  network = google_compute_network.vpc.name
-  allow { protocol = "tcp"; ports = ["8080"] }
+  network = google_compute_network.vpc.id
+
+  allow {
+    protocol = "tcp"
+    ports    = ["8080"]
+  }
+
   source_ranges = [var.jenkins_allow_cidr]
   target_tags   = ["jenkins-vm"]
 }
-
 locals {
   app_startup = <<-EOT
     #!/usr/bin/env bash
