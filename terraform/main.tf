@@ -71,28 +71,33 @@ resource "google_service_account" "jenkins" {
 }
 
 resource "google_project_iam_member" "app_log" {
-  role   = "roles/logging.logWriter"
-  member = "serviceAccount:${google_service_account.app.email}"
+  project = var.project_id
+  role    = "roles/logging.logWriter"
+  member  = "serviceAccount:${google_service_account.app.email}"
 }
 
 resource "google_project_iam_member" "app_mon" {
-  role   = "roles/monitoring.metricWriter"
-  member = "serviceAccount:${google_service_account.app.email}"
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.app.email}"
 }
 
 resource "google_project_iam_member" "app_secret" {
-  role   = "roles/secretmanager.secretAccessor"
-  member = "serviceAccount:${google_service_account.app.email}"
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.app.email}"
 }
 
 resource "google_project_iam_member" "app_sql_client" {
-  role   = "roles/cloudsql.client"
-  member = "serviceAccount:${google_service_account.app.email}"
+  project = var.project_id
+  role    = "roles/cloudsql.client"
+  member  = "serviceAccount:${google_service_account.app.email}"
 }
 
 resource "google_project_iam_member" "jenkins_editor" {
-  role   = "roles/editor"
-  member = "serviceAccount:${google_service_account.jenkins.email}"
+  project = var.project_id
+  role    = "roles/editor"
+  member  = "serviceAccount:${google_service_account.jenkins.email}"
 }
 
 resource "random_password" "db" {
@@ -102,8 +107,11 @@ resource "random_password" "db" {
 
 resource "google_secret_manager_secret" "db_password" {
   secret_id = "db-password"
-  replication { automatic = true }
+  replication {
+    auto {}
+  }
 }
+
 
 resource "google_secret_manager_secret_version" "db_password_v" {
   secret      = google_secret_manager_secret.db_password.id
@@ -233,8 +241,11 @@ locals {
     apt-get install -y openjdk-17-jre wget unzip curl
 
     TF_VERSION=1.7.5
-    wget https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip
-    unzip terraform_* -d /usr/local/bin/
+    wget -q https://releases.hashicorp.com/terraform/$${TF_VERSION}/terraform_$${TF_VERSION}_linux_amd64.zip
+    unzip terraform_$${TF_VERSION}_linux_amd64.zip
+    mv terraform /usr/local/bin/terraform
+    chmod +x /usr/local/bin/terraform
+
 
     curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key | tee \
         /usr/share/keyrings/jenkins-keyring.asc > /dev/null
