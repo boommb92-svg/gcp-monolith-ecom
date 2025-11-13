@@ -25,14 +25,13 @@ resource "google_compute_instance_group" "uig" {
 }
 
 #############################
-# ADD VM TO INSTANCE GROUP
+# ADD EXISTING VM TO INSTANCE GROUP
 #############################
 resource "google_compute_instance_group_membership" "member" {
   instance_group = google_compute_instance_group.uig.id
 
-  instances = [
-    "projects/${var.project_id}/zones/${var.vm_zone}/instances/${var.vm_name}"
-  ]
+  # FIX: ONLY ONE INSTANCE SUPPORTED → USE 'instance'
+  instance = "projects/${var.project_id}/zones/${var.vm_zone}/instances/${var.vm_name}"
 }
 
 #############################
@@ -72,7 +71,7 @@ resource "google_compute_backend_service" "backend" {
 # URL MAP
 #############################
 resource "google_compute_url_map" "urlmap" {
-  name            = "ecom-urlmap"
+  name            = "ecom-url-map"
   default_service = google_compute_backend_service.backend.id
 }
 
@@ -85,7 +84,7 @@ resource "google_compute_target_http_proxy" "http_proxy" {
 }
 
 #############################
-# GLOBAL FORWARDING RULE (HTTP LB)
+# GLOBAL FORWARDING RULE
 #############################
 resource "google_compute_global_forwarding_rule" "http_fr" {
   name                  = "ecom-http-fr"
@@ -95,7 +94,7 @@ resource "google_compute_global_forwarding_rule" "http_fr" {
 }
 
 #############################
-# FIREWALL RULES (LB → BACKEND)
+# FIREWALL RULES (LB → VM)
 #############################
 resource "google_compute_firewall" "allow_gfe" {
   name    = "allow-gfe-backend"
@@ -107,7 +106,7 @@ resource "google_compute_firewall" "allow_gfe" {
   }
 
   source_ranges = [
-    "130.211.0.0/22",
+    "130.211.0.0/22", # LB health check IPs
     "35.191.0.0/16"
   ]
 
