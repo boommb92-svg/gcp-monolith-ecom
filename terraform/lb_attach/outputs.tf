@@ -15,5 +15,5 @@ output "backend_service" {
 
 output "managed_cert_status" {
   description = "Managed certificate provisioning status (if applicable)"
-  value = length(google_compute_managed_ssl_certificate.managed_cert) > 0 ? google_compute_managed_ssl_certificate.managed_cert[0].managed.status : ""
+  value = length(google_compute_managed_ssl_certificate.managed_cert) > 0 ? google_compute_managed_ssl_certificate.managed_cert[0].managed[0].status : ""
 }
