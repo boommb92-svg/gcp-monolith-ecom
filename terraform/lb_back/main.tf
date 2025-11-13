@@ -20,10 +20,11 @@ provider "google" {
 resource "google_compute_instance_group" "uig" {
   name        = var.instance_group_name
   zone        = var.vm_zone
-  network     = var.network
+
+  network = "projects/${var.project_id}/global/networks/${var.network}"
+
   description = "Unmanaged instance group for existing VM"
 }
-
 #############################
 # ADD EXISTING VM TO INSTANCE GROUP
 #############################
