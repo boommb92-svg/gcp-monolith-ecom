@@ -1,10 +1,14 @@
 output "lb_ip" {
-  value       = google_compute_global_forwarding_rule.lb_fr.ip_address
   description = "Public IP of the Load Balancer (may be empty until provisioning finishes)"
+  value = length(google_compute_global_forwarding_rule.lb_fr_https) > 0 ?
+    google_compute_global_forwarding_rule.lb_fr_https[0].ip_address :
+    google_compute_global_forwarding_rule.lb_fr_http[0].ip_address
 }
 
 output "lb_forwarding_rule" {
-  value = google_compute_global_forwarding_rule.lb_fr.self_link
+  value = length(google_compute_global_forwarding_rule.lb_fr_https) > 0 ?
+    google_compute_global_forwarding_rule.lb_fr_https[0].self_link :
+    google_compute_global_forwarding_rule.lb_fr_http[0].self_link
 }
 
 output "backend_service" {
