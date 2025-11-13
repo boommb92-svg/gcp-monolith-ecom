@@ -80,19 +80,26 @@ resource "google_compute_global_address" "static_ip" {
   name  = "lb-static-ip"
   project = var.project_id
 }
-
-# Global forwarding rule (attach to https or http proxy)
-resource "google_compute_global_forwarding_rule" "lb_fr" {
-  name                 = "${var.instance_group_name}-fr"
+# HTTPS forwarding rule (created only if managed certs exist)
+resource "google_compute_global_forwarding_rule" "lb_fr_https" {
+  count               = length(google_compute_managed_ssl_certificate.managed_cert) > 0 ? 1 : 0
+  name                = "${var.instance_group_name}-fr-https"
   load_balancing_scheme = "EXTERNAL"
-  port_range           = length(google_compute_managed_ssl_certificate.managed_cert) > 0 ? "443" : "80"
+  port_range          = "443"
+  target              = google_compute_target_https_proxy.https_proxy[0].self_link
 
-  target = length(google_compute_managed_ssl_certificate.managed_cert) > 0 ?
-    google_compute_target_https_proxy.https_proxy[0].self_link :
-    google_compute_target_http_proxy.http_proxy[0].self_link
+  # If reserving static IP, attach it; otherwise TF will allocate ephemeral IP automatically.
+  ip_address = var.reserve_static_ip ? google_compute_global_address.static_ip[0].address : null
+}
+# HTTP forwarding rule (created only if NO managed certs)
+resource "google_compute_global_forwarding_rule" "lb_fr_http" {
+  count               = length(google_compute_managed_ssl_certificate.managed_cert) > 0 ? 0 : 1
+  name                = "${var.instance_group_name}-fr-http"
+  load_balancing_scheme = "EXTERNAL"
+  port_range          = "80"
+  target              = google_compute_target_http_proxy.http_proxy[0].self_link
 
   ip_address = var.reserve_static_ip ? google_compute_global_address.static_ip[0].address : null
-  # ip_address omitted if not reserving; TF will create ephemeral IP
 }
 
 # Firewall: allow GFE (Google Front Ends) to reach backend_port and health checks
