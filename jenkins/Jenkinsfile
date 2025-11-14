@@ -1,0 +1,71 @@
+pipeline {
+stage('Build Jar') {
+steps {
+sh 'mvn -B -DskipTests package'
+}
+}
+
+
+stage('Build & Push Image') {
+steps {
+script {
+def short = env.GIT_COMMIT?.take(8) ?: 'latest'
+def imageTag = "${IMAGE_NAME}:${short}"
+env.IMAGE_TAG = imageTag
+
+
+// Build
+sh "docker build -t ${imageTag} ."
+
+
+// Push
+sh "docker push ${imageTag}"
+
+
+// update latest tag
+sh "docker tag ${imageTag} ${IMAGE_NAME}:latest || true"
+sh "docker push ${IMAGE_NAME}:latest || true"
+}
+}
+}
+
+
+stage('Deploy to ecom-app') {
+steps {
+sshagent (credentials: [SSH_CREDENTIALS]) {
+script {
+sh '''
+ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '\
+set -e; \
+mkdir -p ${REMOTE_APP_DIR}; \
+cd ${REMOTE_APP_DIR}; \
+cat > docker-compose.yml <<'EOF'
+version: "3.8"
+services:
+ecom-app:
+image: ${IMAGE_TAG}
+restart: always
+ports:
+- "127.0.0.1:8080:8080"
+environment:
+- JAVA_OPTS=-Xmx512m
+EOF
+docker-compose pull || true; \
+docker-compose up -d --remove-orphans'
+'''
+}
+}
+}
+}
+}
+
+
+post {
+success {
+echo "Deployed ${env.IMAGE_TAG} to ${REMOTE_HOST}"
+}
+failure {
+echo "Pipeline failed"
+}
+}
+}
