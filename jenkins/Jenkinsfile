@@ -58,7 +58,52 @@ echo "ERROR: no pom.xml found in workspace. Ensure the repository contains a Mav
 exit 1
 fi
 
-
 POM_DIR=$(dirname "$POM_PATH")
 echo "Found pom.xml in: $POM_DIR"
+
+
+# run maven inside official maven image, mounting workspace and working directory
+docker run --rm -v "$PWD":/workspace -w /workspace/$POM_DIR maven:3.8.8-openjdk-17 mvn -B -DskipTests package
+'''
 }
+}
+
+
+stage('Build & Push Image') {
+steps {
+script {
+// compute tag (use env.GIT_COMMIT if present, else fallback to git)
+def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+shortCommit = shortCommit ?: 'latest'
+def imageTag = "${IMAGE_NAME}:${shortCommit}"
+env.IMAGE_TAG = imageTag
+
+
+sh "docker build -t ${imageTag} ."
+sh "docker push ${imageTag}"
+sh "docker tag ${imageTag} ${IMAGE_NAME}:latest || true"
+sh "docker push ${IMAGE_NAME}:latest || true"
+}
+}
+}
+
+
+stage('Deploy to ecom-app') {
+steps {
+sshagent (credentials: [SSH_CREDENTIALS]) {
+sh '''
+ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '\
+set -e; \
+mkdir -p ${REMOTE_APP_DIR}; \
+cd ${REMOTE_APP_DIR}; \
+cat > docker-compose.yml <<'EOF'
+version: "3.8"
+services:
+ecom-app:
+image: ${IMAGE_TAG}
+restart: always
+ports:
+- "127.0.0.1:8080:8080"
+environment:
+}
+
