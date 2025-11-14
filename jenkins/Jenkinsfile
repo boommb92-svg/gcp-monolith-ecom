@@ -70,4 +70,4 @@ failure {
 echo "Pipeline failed"
 }
 }
-}
+
