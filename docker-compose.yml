@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+ecom-app:
+image: docker.io/pavanyennu/love:latest
+restart: always
+ports:
+- "127.0.0.1:8080:8080"
+environment:
+- JAVA_OPTS=-Xmx512m
+logging:
+driver: json-file
