@@ -29,8 +29,6 @@ pipeline {
     timestamps()
   }
 
-  }
-
   stages {
     stage('Checkout') {
       steps {
