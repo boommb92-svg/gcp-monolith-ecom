@@ -20,7 +20,7 @@ pipeline {
     stage('GCP: fetch secrets & docker login (Workload Identity)') {
       steps {
         sh '''
-          set -euo pipefail
+          set -eu pipefail
 
           # Ensure gcloud exists on the agent (Workload Identity provides ADC automatically)
           if ! command -v gcloud >/dev/null 2>&1; then
