@@ -25,9 +25,10 @@ pipeline {
     IMAGE_TAG       = ""
   }
 
-  options {
+   options {
     timestamps()
-    ansiColor('xterm')
+  }
+
   }
 
   stages {
