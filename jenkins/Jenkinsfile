@@ -1,120 +1,52 @@
 pipeline {
-  agent any
-  environment {
-    PROJECT = "pavan-477919"                // set your GCP project
-    DOCKER_REGISTRY = "docker.io/pavanyennu"       // e.g. us-docker.pkg.dev/project/repo or docker.io/yourorg
-    IMAGE_NAME = "${DOCKER_REGISTRY}/love"
-    SSH_CREDENTIALS = "ecom-deploy-ssh"
-    REMOTE_USER = "deploy"
-    REMOTE_HOST = "34.44.162.183"
-    REMOTE_APP_DIR = "/opt/ecom-app"
-  }
+steps {
+script {
+// compute tag (use env.GIT_COMMIT if present, else fallback to git)
+def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+shortCommit = shortCommit ?: 'latest'
+def imageTag = "${IMAGE_NAME}:${shortCommit}"
+env.IMAGE_TAG = imageTag
 
-  stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
-    }
 
-    stage('GCP: fetch secrets & docker login (Workload Identity)') {
-      steps {
-        sh '''
-          set -eu pipefail
-
-          # Ensure gcloud exists on the agent (Workload Identity provides ADC automatically)
-          if ! command -v gcloud >/dev/null 2>&1; then
-            echo "ERROR: gcloud not found on agent. Install Google Cloud SDK on this node or use an agent image with gcloud."
-            exit 1
-          fi
-
-          # Ensure docker exists on the agent
-          if ! command -v docker >/dev/null 2>&1; then
-            echo "ERROR: docker not found on agent. Install Docker on this node or use an agent image with Docker."
-            exit 1
-          fi
-
-          echo "Using Workload Identity / VM service account to access secrets"
-
-          # Fetch Docker creds from Secret Manager (payload.data is base64 encoded)
-          DOCKER_USER=$(gcloud secrets versions access latest --secret="docker-username" --project=${PROJECT} --format='get(payload.data)' | base64 --decode)
-          DOCKER_PASS=$(gcloud secrets versions access latest --secret="docker-password" --project=${PROJECT} --format='get(payload.data)' | base64 --decode)
-
-          # Perform docker login securely (no secret printed to logs)
-          echo "Logging in to ${DOCKER_REGISTRY} as docker user"
-          echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin ${DOCKER_REGISTRY}
-
-          # unset environment variables to avoid leaking
-          unset DOCKER_PASS
-          unset DOCKER_USER
-        '''
-      }
-    }
-
-    stage('Build Jar') {
-      steps {
-        sh 'mvn -B -DskipTests package'
-      }
-    }
-
-    stage('Build & Push Image') {
-      steps {
-        script {
-          // determine short commit (use env.GIT_COMMIT if available, otherwise git on workspace)
-          def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
-          shortCommit = shortCommit ?: 'latest'
-          def imageTag = "${IMAGE_NAME}:${shortCommit}"
-          env.IMAGE_TAG = imageTag
-
-          // Build image
-          sh "docker build -t ${imageTag} ."
-
-          // Push image
-          sh "docker push ${imageTag}"
-
-          // update latest tag
-          sh "docker tag ${imageTag} ${IMAGE_NAME}:latest || true"
-          sh "docker push ${IMAGE_NAME}:latest || true"
-        }
-      }
-    }
-
-    stage('Deploy to ecom-app') {
-      steps {
-        sshagent (credentials: [SSH_CREDENTIALS]) {
-          script {
-            sh '''
-              ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '\
-                set -e; \
-                mkdir -p ${REMOTE_APP_DIR}; \
-                cd ${REMOTE_APP_DIR}; \
-                cat > docker-compose.yml <<'EOF'
-version: "3.8"
-services:
-  ecom-app:
-    image: ${IMAGE_TAG}
-    restart: always
-    ports:
-      - "127.0.0.1:8080:8080"
-    environment:
-      - JAVA_OPTS=-Xmx512m
-EOF
-                docker-compose pull || true; \
-                docker-compose up -d --remove-orphans'
-            '''
-          }
-        }
-      }
-    }
-  }
-
-  post {
-    success {
-      echo "Deployed ${env.IMAGE_TAG} to ${REMOTE_HOST}"
-    }
-    failure {
-      echo "Pipeline failed"
-    }
-  }
+sh "docker build -t ${imageTag} ."
+sh "docker push ${imageTag}"
+sh "docker tag ${imageTag} ${IMAGE_NAME}:latest || true"
+sh "docker push ${IMAGE_NAME}:latest || true"
+}
+}
 }
 
+
+stage('Deploy to ecom-app') {
+steps {
+sshagent (credentials: [SSH_CREDENTIALS]) {
+sh '''
+ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '\
+set -e; \
+mkdir -p ${REMOTE_APP_DIR}; \
+cd ${REMOTE_APP_DIR}; \
+cat > docker-compose.yml <<'EOF'
+version: "3.8"
+services:
+ecom-app:
+image: ${IMAGE_TAG}
+restart: always
+ports:
+- "127.0.0.1:8080:8080"
+environment:
+- JAVA_OPTS=-Xmx512m
+EOF
+docker-compose pull || true; \
+docker-compose up -d --remove-orphans'
+'''
+}
+}
+}
+}
+
+
+post {
+success { echo "Deployed ${env.IMAGE_TAG} to ${REMOTE_HOST}" }
+failure { echo "Pipeline failed" }
+}
+}
