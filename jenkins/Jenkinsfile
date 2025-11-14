@@ -105,5 +105,20 @@ restart: always
 ports:
 - "127.0.0.1:8080:8080"
 environment:
+- JAVA_OPTS=-Xmx512m
+EOF
+docker-compose pull || true; \
+docker-compose up -d --remove-orphans'
+'''
+}
+}
+}
+}
+
+
+post {
+success { echo "Deployed ${env.IMAGE_TAG} to ${REMOTE_HOST}" }
+failure { echo "Pipeline failed" }
+}
 }
 
