@@ -39,33 +39,23 @@ unset DOCKER_PASS DOCKER_USER
 
 
 stage('Build Jar (containerized)') {
-steps {
-sh '''
-set -eu
+  steps {
+    sh '''
+      set -eu
+      command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 1; }
 
+      POM_PATH=$(find . -maxdepth 6 -name pom.xml -print -quit || true)
+      if [ -z "$POM_PATH" ]; then
+        echo "ERROR: no pom.xml found in workspace."
+        exit 1
+      fi
+      POM_DIR=$(dirname "$POM_PATH")
+      echo "Found pom.xml in: $POM_DIR"
 
-# ensure Docker exists on the agent
-if ! command -v docker >/dev/null 2>&1; then
-echo "ERROR: docker not found on agent. Install Docker on this node or use an agent image with Docker."
-exit 1
-fi
-
-
-# find the directory containing pom.xml (search depth 3)
-POM_PATH=$(find . -maxdepth 3 -name pom.xml -print -quit || true)
-if [ -z "$POM_PATH" ]; then
-echo "ERROR: no pom.xml found in workspace. Ensure the repository contains a Maven project or adjust the search depth."
-exit 1
-fi
-
-POM_DIR=$(dirname "$POM_PATH")
-echo "Found pom.xml in: $POM_DIR"
-
-
-# run maven inside official maven image, mounting workspace and working directory
-docker run --rm -v "$PWD":/workspace -w /workspace/$POM_DIR maven:3.8.8-openjdk-17 mvn -B -DskipTests package
-'''
-}
+      # use a stable maven image tag
+      docker run --rm -v "$PWD":/workspace -w /workspace/$POM_DIR maven:3.8.8 mvn -B -DskipTests package
+    '''
+  }
 }
 
 
