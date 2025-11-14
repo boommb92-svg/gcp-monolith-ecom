@@ -78,4 +78,40 @@ pipeline {
           set -eu
 
           # config (from env injected by Jenkins)
-          P
+          PROJECT=${PROJECT_ID}
+          ZONE=${ZONE}
+          MIG_NAME=${MIG_NAME}
+          TEMPLATE_BASE=${TEMPLATE_BASE}
+          IMAGE=${IMAGE_TAG:-""}
+
+          if [ -z "$IMAGE" ]; then
+            echo "ERROR: IMAGE_TAG is empty. Aborting."
+            exit 1
+          fi
+
+          gcloud config set project ${PROJECT}
+
+          NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
+          echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
+          gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
+            --project=${PROJECT} \
+            --container-image="${IMAGE}" \
+            --container-restart-policy=always \
+            --zone=${ZONE}
+
+          echo "Starting rolling update of MIG: ${MIG_NAME}"
+          gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+            --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
+
+          gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
+        '''
+      }
+    }
+
+  } // stages
+
+  post {
+    success { echo "Deployed ${env.IMAGE_TAG} to ${env.REMOTE_HOST}" }
+    failure { echo "Pipeline failed" }
+  }
+}
