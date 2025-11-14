@@ -1,124 +1,87 @@
 pipeline {
-agent any
-environment {
-PROJECT = "pavan-477919"
-DOCKER_REGISTRY = "docker.io/pavanyennu"
-IMAGE_NAME = "${DOCKER_REGISTRY}/love"
-SSH_CREDENTIALS = "ecom-deploy-ssh"
-REMOTE_USER = "deploy"
-REMOTE_HOST = "34.44.162.183"
-REMOTE_APP_DIR = "/opt/ecom-app"
-}
+  agent any
+  environment {
+    PROJECT = "pavan-477919"
+    DOCKER_REGISTRY = "docker.io/pavanyennu"
+    IMAGE_NAME = "${DOCKER_REGISTRY}/love"
+    REMOTE_HOST = "34.44.162.183"
+  }
 
+  stages {
+    stage('Checkout') { steps { checkout scm } }
 
-stages {
-stage('Checkout') {
-steps { checkout scm }
-}
+    stage('GCP: fetch secrets & docker login (Workload Identity)') {
+      steps {
+        sh '''
+          set -eu
+          command -v gcloud >/dev/null 2>&1 || { echo "gcloud missing"; exit 1; }
+          command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 1; }
 
+          DOCKER_USER=$(gcloud secrets versions access latest --secret="docker-username" --project=${PROJECT} --format='get(payload.data)' | base64 --decode)
+          DOCKER_PASS=$(gcloud secrets versions access latest --secret="docker-password" --project=${PROJECT} --format='get(payload.data)' | base64 --decode)
 
-stage('GCP: fetch secrets & docker login (Workload Identity)') {
-steps {
-sh '''
-set -eu
-command -v gcloud >/dev/null 2>&1 || { echo "gcloud missing"; exit 1; }
-command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 1; }
+          printf '%s' "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin docker.io
 
+          unset DOCKER_PASS DOCKER_USER
+        '''
+      }
+    }
 
-DOCKER_USER=$(gcloud secrets versions access latest --secret="docker-username" --project=${PROJECT} --format='get(payload.data)' | base64 --decode)
-DOCKER_PASS=$(gcloud secrets versions access latest --secret="docker-password" --project=${PROJECT} --format='get(payload.data)' | base64 --decode)
+    stage('Build & Push Image') {
+      steps {
+        script {
+          // compute tag
+          def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+          shortCommit = shortCommit ?: 'latest'
+          def imageTag = "${IMAGE_NAME}:${shortCommit}"
+          env.IMAGE_TAG = imageTag
 
+          sh "docker build --pull -t ${imageTag} ."
+          sh "docker push ${imageTag}"
+          sh "docker tag ${imageTag} ${IMAGE_NAME}:latest || true"
+          sh "docker push ${IMAGE_NAME}:latest || true"
+        }
+      }
+    }
 
-printf '%s' "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin docker.io
+    stage('Deploy -> MIG rolling update (no SSH)') {
+      steps {
+        sh '''
+          set -eu
 
+          # ======= CONFIG (edit if needed) =======
+          PROJECT=pavan-477919
+          ZONE=us-central1-a                  # change to your MIG's zone
+          MIG_NAME=ecom-mig                    # your managed instance group name
+          TEMPLATE_BASE=ecom-template
+          IMAGE=${IMAGE_TAG}                   # from earlier in pipeline
+          # =======================================
 
-unset DOCKER_PASS DOCKER_USER
-'''
-}
-}
+          gcloud config set project ${PROJECT}
 
+          # create a new instance-template that runs your container
+          NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
+          echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
+          gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
+            --project=${PROJECT} \
+            --container-image="${IMAGE}" \
+            --container-restart-policy=always \
+            --zone=${ZONE} || true
 
-stage('Build Jar (containerized)') {
-  steps {
-    sh '''
-      set -eu
-      command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 1; }
+          # start rolling update on the existing MIG
+          echo "Starting rolling update of MIG: ${MIG_NAME}"
+          gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+            --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
 
-      POM_PATH=$(find . -maxdepth 6 -name pom.xml -print -quit || true)
-      if [ -z "$POM_PATH" ]; then
-        echo "ERROR: no pom.xml found in workspace."
-        exit 1
-      fi
-      POM_DIR=$(dirname "$POM_PATH")
-      echo "Found pom.xml in: $POM_DIR"
+          # wait until stable (optional)
+          gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
+        '''
+      }
+    }
+  }
 
-      # use a stable maven image tag
-      docker run --rm -v "$PWD":/workspace -w /workspace/$POM_DIR maven:3.8.8 mvn -B -DskipTests package
-    '''
+  post {
+    success { echo "Deployed ${env.IMAGE_TAG}" }
+    failure { echo "Pipeline failed" }
   }
 }
-
-
-stage('Build & Push Image') {
-steps {
-script {
-// compute tag (use env.GIT_COMMIT if present, else fallback to git)
-def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
-shortCommit = shortCommit ?: 'latest'
-def imageTag = "${IMAGE_NAME}:${shortCommit}"
-env.IMAGE_TAG = imageTag
-
-
-sh "docker build -t ${imageTag} ."
-sh "docker push ${imageTag}"
-sh "docker tag ${imageTag} ${IMAGE_NAME}:latest || true"
-sh "docker push ${IMAGE_NAME}:latest || true"
-}
-}
-}
-  stage('Deploy -> MIG rolling update (no SSH)') {
-  steps {
-    sh '''
-      set -eu
-
-      # ======= CONFIG (edit if needed) =======
-      PROJECT=pavan-477919
-      ZONE=us-central1-a                  # change to your MIG's zone
-      MIG_NAME=ecom-mig                    # your managed instance group name
-      TEMPLATE_BASE=ecom-template
-      IMAGE=${IMAGE_TAG}                   # from earlier in pipeline
-      # =======================================
-
-      gcloud config set project ${PROJECT}
-
-      # create a new instance-template that runs your container
-      NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
-      echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
-      gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
-        --project=${PROJECT} \
-        --container-image="${IMAGE}" \
-        --container-restart-policy=always \
-        --region="" --zone=${ZONE} || true
-
-      # start rolling update on the existing MIG
-      echo "Starting rolling update of MIG: ${MIG_NAME}"
-      gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
-        --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
-
-      # wait until stable (optional, will block until update finishes)
-      gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
-    '''
-  }
-}
-
-
-
-}
-
-
-post {
-success { echo "Deployed ${env.IMAGE_TAG} to ${REMOTE_HOST}" }
-failure { echo "Pipeline failed" }
-}
-}
-
