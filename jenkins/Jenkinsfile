@@ -76,33 +76,43 @@ sh "docker push ${IMAGE_NAME}:latest || true"
 }
 }
 }
+  stage('Deploy -> MIG rolling update (no SSH)') {
+  steps {
+    sh '''
+      set -eu
+
+      # ======= CONFIG (edit if needed) =======
+      PROJECT=pavan-477919
+      ZONE=us-central1-a                  # change to your MIG's zone
+      MIG_NAME=ecom-mig                    # your managed instance group name
+      TEMPLATE_BASE=ecom-template
+      IMAGE=${IMAGE_TAG}                   # from earlier in pipeline
+      # =======================================
+
+      gcloud config set project ${PROJECT}
+
+      # create a new instance-template that runs your container
+      NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
+      echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
+      gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
+        --project=${PROJECT} \
+        --container-image="${IMAGE}" \
+        --container-restart-policy=always \
+        --region="" --zone=${ZONE} || true
+
+      # start rolling update on the existing MIG
+      echo "Starting rolling update of MIG: ${MIG_NAME}"
+      gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+        --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
+
+      # wait until stable (optional, will block until update finishes)
+      gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
+    '''
+  }
+}
 
 
-stage('Deploy to ecom-app') {
-steps {
-sshagent (credentials: [SSH_CREDENTIALS]) {
-sh '''
-ssh -o StrictHostKeyChecking=no ${REMOTE_USER}@${REMOTE_HOST} '\
-set -e; \
-mkdir -p ${REMOTE_APP_DIR}; \
-cd ${REMOTE_APP_DIR}; \
-cat > docker-compose.yml <<'EOF'
-version: "3.8"
-services:
-ecom-app:
-image: ${IMAGE_TAG}
-restart: always
-ports:
-- "127.0.0.1:8080:8080"
-environment:
-- JAVA_OPTS=-Xmx512m
-EOF
-docker-compose pull || true; \
-docker-compose up -d --remove-orphans'
-'''
-}
-}
-}
+
 }
 
 
