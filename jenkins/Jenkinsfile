@@ -87,10 +87,9 @@ pipeline {
     '''
   }
 }
-
-  post {
-    success { echo "Deployed ${env.IMAGE_TAG}" }
-    failure { echo "Pipeline failed" }
-  }
+post {
+success { echo "Deployed ${env.IMAGE_TAG} to ${REMOTE_HOST}" }
+failure { echo "Pipeline failed" }
 }
+  }
 }
