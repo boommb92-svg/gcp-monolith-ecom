@@ -1,117 +1,196 @@
 pipeline {
   agent any
-  environment {
-    PROJECT_ID     = "pavan-477919"                 // ensure PROJECT_ID exists (was PROJECT)
-    PROJECT        = "${PROJECT_ID}"                // keep PROJECT too if other code uses it
-    DOCKER_REGISTRY = "docker.io/pavanyennu"
-    IMAGE_NAME     = "${DOCKER_REGISTRY}/love"
-    SSH_CREDENTIALS = "ecom-deploy-ssh"
-    REMOTE_USER    = "deploy"
-    REMOTE_HOST    = "34.44.162.183"
-    REMOTE_APP_DIR = "/opt/ecom-app"
 
-    // MIG-specific variables — set these to match your infra
-    ZONE           = "us-central1-a"                // change to your MIG's zone
-    MIG_NAME       = "ecom-mig"                     // your managed instance group name
-    TEMPLATE_BASE  = "ecom-template"
+  environment {
+    // Primary project settings (edit if you want a different default)
+    PROJECT_ID      = "pavan-477919"             // <-- ensure this matches your GCP project
+    PROJECT         = "${PROJECT_ID}"            // keep both for compatibility
+
+    // Docker settings
+    DOCKER_REGISTRY = "docker.io/pavanyennu"
+    IMAGE_NAME      = "${DOCKER_REGISTRY}/love"
+
+    // SSH / deploy info (kept from your original)
+    SSH_CREDENTIALS = "ecom-deploy-ssh"
+    REMOTE_USER     = "deploy"
+    REMOTE_HOST     = "34.44.162.183"
+    REMOTE_APP_DIR  = "/opt/ecom-app"
+
+    // MIG settings - change to match your infra if needed
+    ZONE            = "us-central1-a"
+    MIG_NAME        = "ecom-mig"
+    TEMPLATE_BASE   = "ecom-template"
+
+    // Safety default; will be overwritten in Build stage
+    IMAGE_TAG       = ""
+  }
+
+  options {
+    timestamps()
+    ansiColor('xterm')
   }
 
   stages {
-    // ... your existing stages (Checkout, fetch secrets, build, push, etc.) ...
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
 
-    stage('Fetch Latest Template') {
+    stage('GCP: fetch secrets & docker login (Workload Identity)') {
+      steps {
+        sh '''
+          set -eu
+          command -v gcloud >/dev/null 2>&1 || { echo "gcloud missing"; exit 1; }
+          command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 1; }
+
+          DOCKER_USER=$(gcloud secrets versions access latest --secret="docker-username" --project=$PROJECT_ID --format='get(payload.data)' | base64 --decode)
+          DOCKER_PASS=$(gcloud secrets versions access latest --secret="docker-password" --project=$PROJECT_ID --format='get(payload.data)' | base64 --decode)
+
+          printf '%s' "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin docker.io
+
+          unset DOCKER_PASS DOCKER_USER
+        '''
+      }
+    }
+
+    stage('Build Jar (containerized)') {
+      steps {
+        sh '''
+          set -eu
+          command -v docker >/dev/null 2>&1 || { echo "docker missing"; exit 1; }
+
+          POM_PATH=$(find . -maxdepth 6 -name pom.xml -print -quit || true)
+          if [ -z "$POM_PATH" ]; then
+            echo "ERROR: no pom.xml found in workspace."
+            exit 1
+          fi
+          POM_DIR=$(dirname "$POM_PATH")
+          echo "Found pom.xml in: $POM_DIR"
+
+          # use a stable maven image tag
+          docker run --rm -v "$PWD":/workspace -w /workspace/$POM_DIR maven:3.8.8 mvn -B -DskipTests package
+        '''
+      }
+    }
+
+    stage('Build & Push Image') {
       steps {
         script {
-          // fail fast if any required env var is missing
-          if (!env.PROJECT_ID?.trim()) {
-            error "PROJECT_ID is not set"
-          }
-          if (!env.ZONE?.trim()) {
-            error "ZONE is not set"
-          }
-          if (!env.MIG_NAME?.trim()) {
-            error "MIG_NAME is not set"
-          }
+          // compute tag (use env.GIT_COMMIT if present, else fallback to git)
+          def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+          if (!shortCommit) { shortCommit = 'latest' }
+          def imageTag = "${env.IMAGE_NAME}:${shortCommit}"
 
-          // Get the latest instance template name (most-recent creationTimestamp)
+          // export to Jenkins env so subsequent stages can read it
+          env.IMAGE_TAG = imageTag
+
+          // helpful debug info
+          echo "DEBUG: computed image tag => ${env.IMAGE_TAG}"
+
+          // build & push
+          sh "docker build -t ${env.IMAGE_TAG} ."
+          sh "docker push ${env.IMAGE_TAG}"
+          // also tag latest (best-effort)
+          sh "docker tag ${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest || true"
+          sh "docker push ${env.IMAGE_NAME}:latest || true"
+
+          // persist the tag to the workspace for additional debugging / external consumption
+          sh "printf '%s' \"${env.IMAGE_TAG}\" > image-tag.txt || true"
+        }
+      }
+    }
+
+    stage('Fetch Latest Template (optional)') {
+      steps {
+        script {
+          // This stage fetches the latest instance template name (most recent creationTimestamp).
+          // If none found, INSTANCE_TEMPLATE will be empty and Update MIG stage will skip.
           def latestTemplate = sh(
-            script: """
-              gcloud compute instance-templates list \
-                --project=${env.PROJECT_ID} \
-                --sort-by=~creationTimestamp \
-                --format='value(name)' | head -n 1
-            """,
+            script: "gcloud compute instance-templates list --project=${env.PROJECT_ID} --sort-by=~creationTimestamp --format='value(name)' | head -n 1 || true",
             returnStdout: true
           ).trim()
-
-          if (!latestTemplate) {
-            echo "No instance templates found in project ${env.PROJECT_ID}"
-            env.INSTANCE_TEMPLATE = ""
-          } else {
+          if (latestTemplate) {
             echo "Latest Instance Template: ${latestTemplate}"
             env.INSTANCE_TEMPLATE = latestTemplate
+          } else {
+            echo "No instance templates present in project ${env.PROJECT_ID}"
+            env.INSTANCE_TEMPLATE = ""
           }
         }
       }
     }
 
-    stage('Update MIG') {
+    stage('Update MIG (if template found)') {
       when {
         expression { return env.INSTANCE_TEMPLATE?.trim() }
       }
       steps {
-        script {
-          sh """
-            set -eu pipefail
-            gcloud compute instance-groups managed set-instance-template ${env.MIG_NAME} \
-              --template=${env.INSTANCE_TEMPLATE} \
-              --zone=${env.ZONE} \
-              --project=${env.PROJECT_ID}
-          """
-        }
+        sh '''
+          set -eu
+          gcloud compute instance-groups managed set-instance-template "$MIG_NAME" \
+            --template="$INSTANCE_TEMPLATE" \
+            --zone="$ZONE" \
+            --project="$PROJECT_ID"
+        '''
       }
     }
 
     stage('Deploy -> MIG rolling update (no SSH)') {
       steps {
         sh '''
-          set -eu
+          set -euxo pipefail
 
-          # config (from env injected by Jenkins)
-          PROJECT=${PROJECT_ID}
-          ZONE=${ZONE}
-          MIG_NAME=${MIG_NAME}
-          TEMPLATE_BASE=${TEMPLATE_BASE}
-          IMAGE=${IMAGE_TAG:-""}
+          echo "---- DEBUG ENV (Jenkins-provided) ----"
+          echo "PROJECT_ID: ${PROJECT_ID:-<not set>}"
+          echo "ZONE: ${ZONE:-<not set>}"
+          echo "MIG_NAME: ${MIG_NAME:-<not set>}"
+          echo "TEMPLATE_BASE: ${TEMPLATE_BASE:-<not set>}"
+          echo "IMAGE_NAME (base): ${IMAGE_NAME:-<not set>}"
+          echo "IMAGE_TAG (from Jenkins env): ${IMAGE_TAG:-<not set>}"
+          echo "--------------------------------------"
+
+          # Choose image: prefer IMAGE_TAG (set in Build stage), else fallback to IMAGE_NAME:latest
+          IMAGE="${IMAGE_TAG:-${IMAGE_NAME}:latest}"
+          echo "Using IMAGE => ${IMAGE}"
 
           if [ -z "$IMAGE" ]; then
-            echo "ERROR: IMAGE_TAG is empty. Aborting."
+            echo "ERROR: IMAGE resolves to empty. Aborting."
             exit 1
           fi
 
-          gcloud config set project ${PROJECT}
+          # set project and generate template name
+          gcloud config set project "${PROJECT_ID}"
 
           NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
           echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
+
+          # create-with-container expects zone (or region). Use zone here.
           gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
-            --project=${PROJECT} \
+            --project="${PROJECT_ID}" \
             --container-image="${IMAGE}" \
             --container-restart-policy=always \
-            --zone=${ZONE}
+            --zone="${ZONE}"
 
           echo "Starting rolling update of MIG: ${MIG_NAME}"
           gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
-            --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
+            --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project="${PROJECT_ID}"
 
-          gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
+          echo "Waiting until MIG update stabilizes..."
+          gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project="${PROJECT_ID}"
+
+          echo "Deploy completed for ${IMAGE}"
         '''
       }
     }
-
   } // stages
 
   post {
-    success { echo "Deployed ${env.IMAGE_TAG} to ${env.REMOTE_HOST}" }
-    failure { echo "Pipeline failed" }
+    success {
+      echo "Deployed ${env.IMAGE_TAG} to MIG ${env.MIG_NAME} (project ${env.PROJECT_ID})"
+    }
+    failure {
+      echo "Pipeline failed — check logs above for the failing step."
+    }
   }
 }
