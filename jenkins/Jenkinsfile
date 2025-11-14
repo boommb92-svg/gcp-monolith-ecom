@@ -73,3 +73,6 @@ script {
 // determine short commit (use env.GIT_COMMIT if available, otherwise git on workspace)
 }
 }
+}
+}
+}
