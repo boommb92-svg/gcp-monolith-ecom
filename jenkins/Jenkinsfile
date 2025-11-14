@@ -76,6 +76,41 @@ sh "docker push ${IMAGE_NAME}:latest || true"
 }
 }
 }
+
+        stage('Fetch Latest Template') {
+            steps {
+                script {
+                    // Get the latest instance template name
+                    def latestTemplate = sh(
+                        script: """
+                            gcloud compute instance-templates list \
+                            --project=${PROJECT_ID} \
+                            --sort-by=creationTimestamp \
+                            --format='value(name)' | tail -n 1
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Latest Instance Template: ${latestTemplate}"
+                    env.INSTANCE_TEMPLATE = latestTemplate
+                }
+            }
+        }
+
+        stage('Update MIG') {
+            steps {
+                script {
+                    sh """
+                        gcloud compute instance-groups managed set-instance-template ${MIG_NAME} \
+                        --template=${INSTANCE_TEMPLATE} \
+                        --zone=${ZONE} \
+                        --project=${PROJECT_ID}
+                    """
+                }
+            }
+        }
+
+  
   stage('Deploy -> MIG rolling update (no SSH)') {
   steps {
     sh '''
