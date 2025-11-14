@@ -45,40 +45,48 @@ pipeline {
     }
 
     stage('Deploy -> MIG rolling update (no SSH)') {
-      steps {
-        sh '''
-          set -eu
+  steps {
+    sh '''
+      set -eu
 
-          # ======= CONFIG (edit if needed) =======
-          PROJECT=pavan-477919
-          ZONE=us-central1-a                  # change to your MIG's zone
-          MIG_NAME=ecom-mig                    # your managed instance group name
-          TEMPLATE_BASE=ecom-template
-          IMAGE=${IMAGE_TAG}                   # from earlier in pipeline
-          # =======================================
+      PROJECT=pavan-477919
+      ZONE=us-central1-a
+      MIG_NAME=ecom-mig
+      TEMPLATE_BASE=ecom-template
+      IMAGE=${IMAGE_TAG}
 
-          gcloud config set project ${PROJECT}
+      gcloud config set project ${PROJECT}
 
-          # create a new instance-template that runs your container
-          NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
-          echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
-          gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
-            --project=${PROJECT} \
-            --container-image="${IMAGE}" \
-            --container-restart-policy=always \
-            --zone=${ZONE} || true
+      NEW_TEMPLATE="${TEMPLATE_BASE}-$(date +%s)"
+      echo "Creating new instance template: ${NEW_TEMPLATE} with image ${IMAGE}"
 
-          # start rolling update on the existing MIG
-          echo "Starting rolling update of MIG: ${MIG_NAME}"
-          gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
-            --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
+      # create template (note: NO --zone here)
+      if ! gcloud compute instance-templates create-with-container "${NEW_TEMPLATE}" \
+          --project=${PROJECT} \
+          --container-image="${IMAGE}" \
+          --container-restart-policy=always \
+          --machine-type=e2-medium \
+          --boot-disk-size=10GB \
+          --tags=ecom-app ; then
+        echo "create-with-container failed; exiting"
+        exit 1
+      fi
 
-          # wait until stable (optional)
-          gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
-        '''
-      }
-    }
+      # verify template exists
+      if ! gcloud compute instance-templates describe "${NEW_TEMPLATE}" --project=${PROJECT} >/dev/null 2>&1 ; then
+        echo "Template ${NEW_TEMPLATE} not found after create; aborting"
+        exit 1
+      fi
+
+      echo "Starting rolling update of MIG: ${MIG_NAME} using template ${NEW_TEMPLATE}"
+      gcloud compute instance-groups managed rolling-action start-update "${MIG_NAME}" \
+        --version=template="${NEW_TEMPLATE}" --zone="${ZONE}" --project=${PROJECT}
+
+      # optional: wait until stable
+      gcloud compute instance-groups managed wait-until-stable "${MIG_NAME}" --zone="${ZONE}" --project=${PROJECT}
+    '''
   }
+}
 
   post {
     success { echo "Deployed ${env.IMAGE_TAG}" }
