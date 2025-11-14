@@ -1,7 +1,0 @@
-<html>
-  <body>
-    <h1>Monolithic E-commerce App</h1>
-    <p>Running on GCP VM with private DB</p>
-  </body>
-</html>
-
