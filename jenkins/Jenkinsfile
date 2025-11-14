@@ -1,4 +1,7 @@
 pipeline {
+}
+
+
 stage('Build Jar') {
 steps {
 sh 'mvn -B -DskipTests package'
@@ -9,16 +12,18 @@ sh 'mvn -B -DskipTests package'
 stage('Build & Push Image') {
 steps {
 script {
-def short = env.GIT_COMMIT?.take(8) ?: 'latest'
-def imageTag = "${IMAGE_NAME}:${short}"
+// determine short commit (use env.GIT_COMMIT if available, otherwise git on workspace)
+def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+shortCommit = shortCommit ?: 'latest'
+def imageTag = "${IMAGE_NAME}:${shortCommit}"
 env.IMAGE_TAG = imageTag
 
 
-// Build
+// Build image
 sh "docker build -t ${imageTag} ."
 
 
-// Push
+// Push image
 sh "docker push ${imageTag}"
 
 
