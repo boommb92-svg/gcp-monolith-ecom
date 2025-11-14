@@ -62,7 +62,7 @@ pipeline {
       steps {
         script {
           sh """
-            set -euo pipefail
+            set -eu pipefail
             gcloud compute instance-groups managed set-instance-template ${env.MIG_NAME} \
               --template=${env.INSTANCE_TEMPLATE} \
               --zone=${env.ZONE} \
