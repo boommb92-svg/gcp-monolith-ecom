@@ -9,7 +9,7 @@ pipeline {
     // Docker settings
     DOCKER_REGISTRY = "docker.io/pavanyennu"
     IMAGE_NAME      = "${DOCKER_REGISTRY}/love"
-    TAG   = "${env.GIT_COMMIT}"
+    
 
     // SSH / deploy info (kept from your original)
     SSH_CREDENTIALS = "ecom-deploy-ssh"
@@ -23,7 +23,7 @@ pipeline {
     TEMPLATE_BASE   = "ecom-template"
 
     // Safety default; will be overwritten in Build stage
-    IMAGE_TAG       = ""
+    IMAGE_TAG       = "latest"
   }
 
    options {
