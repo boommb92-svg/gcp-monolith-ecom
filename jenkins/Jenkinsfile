@@ -89,8 +89,10 @@ pipeline {
           echo "DEBUG: computed image tag => ${env.IMAGE_TAG}"
 
           // build & push
-          sh "docker build -t ${env.IMAGE_TAG} ."
-          sh "docker push ${env.IMAGE_TAG}"
+    
+          sh "docker build -t ${IMAGE}:${TAG}"
+          sh "docker push ${IMAGE}:${TAG}"
+
           // also tag latest (best-effort)
           sh "docker tag ${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest || true"
           sh "docker push ${env.IMAGE_NAME}:latest || true"
