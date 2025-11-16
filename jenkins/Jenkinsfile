@@ -9,6 +9,7 @@ pipeline {
     // Docker settings
     DOCKER_REGISTRY = "docker.io/pavanyennu"
     IMAGE_NAME      = "${DOCKER_REGISTRY}/love"
+    TAG   = "${env.GIT_COMMIT}"
 
     // SSH / deploy info (kept from your original)
     SSH_CREDENTIALS = "ecom-deploy-ssh"
