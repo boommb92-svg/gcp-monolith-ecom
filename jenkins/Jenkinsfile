@@ -77,18 +77,26 @@ pipeline {
     stage('Build & Push Image') {
       steps {
         script {
+            // Compute a short commit hash for tagging
             def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
             if (!shortCommit) { shortCommit = 'latest' }
+
+            // Construct full image tag
             env.IMAGE_TAG = "${env.IMAGE_NAME}:${shortCommit}"
 
             echo "DEBUG: Computed IMAGE_TAG => ${env.IMAGE_TAG}"
 
+            // Build Docker image using the correct context (.)
             sh "docker build -t ${env.IMAGE_TAG} ."
+
+            // Push the computed tag to Docker Hub
             sh "docker push ${env.IMAGE_TAG}"
 
+            // Also tag and push 'latest' for convenience
             sh "docker tag ${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest"
             sh "docker push ${env.IMAGE_NAME}:latest"
 
+            // Save tag to workspace for later use if needed
             sh "printf '%s' \"${env.IMAGE_TAG}\" > image-tag.txt || true"
 
         }
