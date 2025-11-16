@@ -8,7 +8,7 @@ pipeline {
 
     // Docker settings
     DOCKER_REGISTRY = "docker.io/pavanyennu"
-    IMAGE_NAME      = "${DOCKER_REGISTRY}/love"
+    IMAGE_NAME      = "${DOCKER_REGISTRY}/ecom-app"
     
 
     // SSH / deploy info (kept from your original)
