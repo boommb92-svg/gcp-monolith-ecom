@@ -78,8 +78,9 @@ pipeline {
       steps {
         script {
             // Compute a short commit hash for tagging
-            def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+          def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
             if (!shortCommit) { shortCommit = 'latest' }
+
 
             // Construct full image tag
             env.IMAGE_TAG = "${env.IMAGE_NAME}:${shortCommit}"
