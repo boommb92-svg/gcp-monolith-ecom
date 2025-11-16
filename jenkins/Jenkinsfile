@@ -78,27 +78,27 @@ pipeline {
       steps {
         script {
           // compute tag (use env.GIT_COMMIT if present, else fallback to git)
-          def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
-          if (!shortCommit) { shortCommit = 'latest' }
-          def imageTag = "${env.IMAGE_NAME}:${shortCommit}"
+                     def shortCommit = env.GIT_COMMIT ?: sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
+            if (!shortCommit) { shortCommit = 'latest' }
 
-          // export to Jenkins env so subsequent stages can read it
-          env.IMAGE_TAG = imageTag
+            // construct full image tag
+            env.IMAGE_TAG = "${env.IMAGE_NAME}:${shortCommit}"
 
-          // helpful debug info
-          echo "DEBUG: computed image tag => ${env.IMAGE_TAG}"
+            echo "DEBUG: Computed IMAGE_TAG => ${env.IMAGE_TAG}"
 
-          // build & push using computed IMAGE_TAG
-          sh "docker build -t ${env.IMAGE_TAG} ."
-          sh "docker push ${env.IMAGE_TAG}"
+            // Build Docker image with correct context
+            sh "docker build -t ${env.IMAGE_TAG} ."
 
-          // also tag latest (best-effort)
-          sh "docker tag ${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest || true"
-          sh "docker push ${env.IMAGE_NAME}:latest || true"
+            // Push computed tag to Docker Hub
+            sh "docker push ${env.IMAGE_TAG}"
 
+            // Also tag and push 'latest' for convenience
+            sh "docker tag ${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest"
+            sh "docker push ${env.IMAGE_NAME}:latest"
 
-          // persist the tag to the workspace for additional debugging / external consumption
-          sh "printf '%s' \"${env.IMAGE_TAG}\" > image-tag.txt || true"
+            // Save tag to workspace for later use if needed
+            sh "printf '%s' \"${env.IMAGE_TAG}\" > image-tag.txt || true"
+
         }
       }
     }
