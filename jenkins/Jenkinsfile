@@ -88,14 +88,14 @@ pipeline {
           // helpful debug info
           echo "DEBUG: computed image tag => ${env.IMAGE_TAG}"
 
-          // build & push
-    
-          sh "docker build -t ${IMAGE}:${TAG}"
-          sh "docker push ${IMAGE}:${TAG}"
+          // build & push using computed IMAGE_TAG
+          sh "docker build -t ${env.IMAGE_TAG} ."
+          sh "docker push ${env.IMAGE_TAG}"
 
           // also tag latest (best-effort)
           sh "docker tag ${env.IMAGE_TAG} ${env.IMAGE_NAME}:latest || true"
           sh "docker push ${env.IMAGE_NAME}:latest || true"
+
 
           // persist the tag to the workspace for additional debugging / external consumption
           sh "printf '%s' \"${env.IMAGE_TAG}\" > image-tag.txt || true"
